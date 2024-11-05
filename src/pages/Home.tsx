@@ -1,9 +1,12 @@
+// src/pages/Home.tsx
 import React, { useState } from 'react';
 import { Newspaper } from 'lucide-react';
 import toast from 'react-hot-toast';
 import URLInput from '../components/URLInput';
 import SummaryPreview from '../components/SummaryPreview';
 import VideoPreview from '../components/VideoPreview';
+import ImagePreview from '../components/ImagePreview';
+import EditSummaryModal from '../components/EditSummaryModal'; // Import the modal
 import { Summary, Project } from '../types';
 import { extractSummaryAndScript, getImagesForSummary } from '../services/api';
 
@@ -11,6 +14,10 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [project, setProject] = useState<Project | null>(null);
+  const [images, setImages] = useState<string[]>([]);
+  const [isGeneratingImages, setIsGeneratingImages] = useState(false);
+  const [isEditing, setIsEditing] = useState(false); // Modal state
+  const [targetLanguage, setTargetLanguage] = useState<string>('en'); // Language state
 
   const handleURLSubmit = async (url: string) => {
     setIsLoading(true);
@@ -34,16 +41,28 @@ export default function Home() {
     }
   };
 
-  const handleGenerateVideo = async () => {
+  const handleGenerateImages = async () => {
     if (!summary) return;
     
+    setIsGeneratingImages(true);
+    try {
+      const fetchedImages = await getImagesForSummary(summary.content);
+      setImages(fetchedImages.map((image: any) => image.url));
+      toast.success('Images generated successfully!');
+    } catch (error) {
+      console.error('Error fetching images:', error);
+      toast.error('Failed to fetch images. Please try again.');
+    } finally {
+      setIsGeneratingImages(false);
+    }
+  };
+
+  const handleGenerateVideo = async () => {
+    if (!summary || images.length === 0) return;
+
     try {
       toast.loading('Generating video...', { id: 'video-generation' });
       
-      // Get images based on the summary
-      const images = await getImagesForSummary(summary.content);
-      
-      // Create a project with the generated content
       const newProject: Project = {
         id: Date.now().toString(),
         title: summary.title,
@@ -52,28 +71,46 @@ export default function Home() {
           scenes: summary.videoScript?.split('\n').map((text, index) => ({
             text,
             image: images[index % images.length] || '',
-            duration: 5
+            duration: 3
           })) || []
         },
         status: 'processing',
         createdAt: new Date().toISOString()
       };
-      
+
       setProject(newProject);
       toast.success('Video generation started!', { id: 'video-generation' });
-      
-      // Simulate video processing
-      setTimeout(() => {
-        setProject(prev => prev ? {
-          ...prev,
-          status: 'ready',
-          videoUrl: 'https://example.com/video.mp4' // This would be the actual video URL in production
-        } : null);
-      }, 5000);
-      
+
+      // Make the API call to generate video
+      const response = await fetch('http://localhost:5000/generate-video', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          video_script: newProject.videoScript,
+          images: newProject.videoScript.scenes.map(scene => scene.image),
+          target_language: targetLanguage // Pass the language to the server
+        }),
+      });
+
+      const result = await response.json();
+      if (result.video_path) {
+        setProject(prev => prev ? { ...prev, status: 'ready', videoUrl: result.video_path } : null);
+        toast.success('Video generated successfully!', { id: 'video-generation' });
+      } else {
+        throw new Error(result.error);
+      }
+
     } catch (error) {
       console.error('Error generating video:', error);
       toast.error('Failed to generate video. Please try again.', { id: 'video-generation' });
+    }
+  };
+
+  const handleEditSummary = (newContent: string) => {
+    if (summary) {
+      setSummary({ ...summary, content: newContent });
     }
   };
 
@@ -85,7 +122,7 @@ export default function Home() {
           ~| Press World |~
         </h1>
         <p className="mt-2 text-lg text-gray-600">
-        <b>Generate videos for News without hassle</b>
+          <b>Generate videos for News without hassle</b>
         </p>
       </div>
 
@@ -93,27 +130,53 @@ export default function Home() {
         <URLInput onSubmit={handleURLSubmit} isLoading={isLoading} />
         
         {summary && !project && (
-          <SummaryPreview
-            summary={summary}
-            onApprove={handleGenerateVideo}
-            onEdit={() => {
-              toast.error('Edit functionality coming soon!');
-            }}
-          />
+          <>
+            <SummaryPreview
+              summary={summary}
+              onApprove={handleGenerateImages}
+              onEdit={() => setIsEditing(true)} // Open edit modal
+            />
+            <div className="flex space-x-4">
+              <button 
+                onClick={handleGenerateImages} 
+                className="p-2 bg-green-600 text-white rounded"
+                disabled={isGeneratingImages}
+              >
+                {isGeneratingImages ? 'Generating Images...' : 'Generate Images'}
+              </button>
+              <button 
+                onClick={handleGenerateVideo} 
+                className="p-2 bg-blue-600 text-white rounded"
+                disabled={!images.length}
+              >
+                Generate Video
+              </button>
+            </div>
+            {images.length > 0 && (
+              <ImagePreview images={images} />
+            )}
+          </>
         )}
 
         {project && (
           <VideoPreview
             project={project}
             onShare={() => {
-              toast.error('Share functionality coming soon!');
+              toast.error('Share functionality is on work!');
             }}
             onDownload={() => {
-              toast.error('Download functionality coming soon!');
+              toast.error('Download functionality is on work!');
             }}
           />
         )}
       </div>
+
+      <EditSummaryModal
+        isOpen={isEditing}
+        onClose={() => setIsEditing(false)}
+        summaryContent={summary ? summary.content : ''}
+        onSave={handleEditSummary}
+      />
     </main>
   );
 }

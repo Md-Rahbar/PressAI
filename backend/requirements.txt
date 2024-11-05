@@ -1,0 +1,11 @@
+flask
+flask_cors
+transformers
+requests
+bs4
+langchain_ollama
+image
+re
+urllib.parse
+icrawler
+spacy

@@ -49,7 +49,7 @@ export async function getImagesForSummary(summary: string) {
     });
 
     const data = await handleResponse(response);
-    return data.images;
+    return data.images;  // Ensure this returns the images array
   } catch (error) {
     if (error instanceof APIError) {
       throw error;

@@ -1,3 +1,4 @@
+// src/components/SummaryPreview.tsx
 import React from 'react';
 import { Summary } from '../types';
 import { FileText } from 'lucide-react';

@@ -1,4 +1,3 @@
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from transformers import PegasusForConditionalGeneration, PegasusTokenizer
@@ -6,12 +5,19 @@ import requests
 from bs4 import BeautifulSoup
 from langchain_ollama import OllamaLLM
 from image import get_images_based_on_summary  # Import function from image.py
+from video import generate_video  # Assuming you have a video.py for video generation
+from gtts import gTTS
+from googletrans import Translator
+import os
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS
 
-# Initialize the Ollama model and Pegasus model
+# Initialize the models
 llm = OllamaLLM(model="llama3.2")
+model_name = "google/pegasus-cnn_dailymail"
+tokenizer = PegasusTokenizer.from_pretrained(model_name)
+model = PegasusForConditionalGeneration.from_pretrained(model_name)
 
 # Function to extract text from URL
 def extract_text_from_url(url):
@@ -26,10 +32,6 @@ def extract_text_from_url(url):
 
 # Function to summarize text
 def summarize_text(text):
-    model_name = "google/pegasus-cnn_dailymail"
-    tokenizer = PegasusTokenizer.from_pretrained(model_name)
-    model = PegasusForConditionalGeneration.from_pretrained(model_name)
-
     inputs = tokenizer(text, truncation=True, padding="longest", return_tensors="pt")
     summary_ids = model.generate(
         inputs["input_ids"],
@@ -53,8 +55,6 @@ def summarize_and_generate_script():
     try:
         text = extract_text_from_url(url)
         summary = summarize_text(text)
-
-        # Generate video script based on the summary
         video_script = generate_video_script(summary)
 
         return jsonify({"summary": summary, "video_script": video_script})
@@ -62,10 +62,11 @@ def summarize_and_generate_script():
         return jsonify({"error": str(e)}), 500
 
 # Function to generate video script from summary using Ollama Llama 3.2
-def generate_video_script(summary):
+def generate_video_script(summary, target_language='en'):
     prompt = f"Generate a professional video script based on the following summary: {summary}\nScript:"
     response = llm.invoke(prompt)
-    return response
+    translated_script = translate_text(response, target_language)
+    return translated_script
 
 # New API endpoint to get images based on the summary
 @app.route('/get-images', methods=['POST'])
@@ -76,8 +77,39 @@ def get_images():
         return jsonify({"error": "Summary is required"}), 400
 
     try:
-        images = get_images_based_on_summary(summary)  # Call function in image.py
+        images = get_images_based_on_summary(summary)
         return jsonify({"images": images})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+def generate_narration(video_script, language='en'):
+    narration_text = " ".join([scene['text'] for scene in video_script['scenes']])
+    
+    tts = gTTS(text=narration_text, lang=language)
+    narration_path = 'narration.mp3'  # Customize the path as needed
+    tts.save(narration_path)
+    
+    return narration_path
+
+def translate_text(text, dest_language='en'):
+    translator = Translator()
+    translated = translator.translate(text, dest=dest_language)
+    return translated.text
+
+# New API endpoint for generating video
+@app.route('/generate-video', methods=['POST'])
+def generate_video_endpoint():
+    data = request.get_json()
+    video_script = data.get('video_script')
+    images = data.get('images')
+
+    if not video_script or not images:
+        return jsonify({"error": "Video script and images are required"}), 400
+
+    try:
+        narration_path = generate_narration(video_script)
+        video_path = generate_video(video_script, images, narration_path)
+        return jsonify({"video_path": video_path, "narration_path": narration_path})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
